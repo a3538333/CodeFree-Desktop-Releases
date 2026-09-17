@@ -1,0 +1,55 @@
+name: cleanup-old-releases
+
+on:
+  schedule:
+    - cron: "17 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: List old releases without deleting them
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cleanup-old-releases
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KEEP_RELEASES: "10"
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+    steps:
+      - name: Delete old releases
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t releases < <(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.draft == false) | [.published_at, .tag_name] | @tsv' |
+              sort --reverse
+          )
+
+          count=${#releases[@]}
+          echo "Found $count published releases; keeping the newest $KEEP_RELEASES."
+          if ((count <= KEEP_RELEASES)); then
+            echo "Nothing to delete."
+            exit 0
+          fi
+
+          for release in "${releases[@]:KEEP_RELEASES}"; do
+            tag=${release#*$'\t'}
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "Would delete $tag"
+              continue
+            fi
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            echo "Deleted $tag"
+          done
