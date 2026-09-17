@@ -1,0 +1,49 @@
+name: cstcloud-release-sync
+
+on:
+  repository_dispatch:
+    types:
+      - cstcloud-release-sync
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Desktop version, with or without the v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cstcloud-release-sync-${{ github.event.client_payload.version || inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ github.event.client_payload.version || inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REPO: ${{ github.repository }}
+      CSTCLOUD_BUCKET: ${{ vars.CSTCLOUD_BUCKET }}
+      CSTCLOUD_PREFIX: ${{ vars.CSTCLOUD_PREFIX }}
+      RCLONE_CONFIG_CSTCLOUD_TYPE: s3
+      RCLONE_CONFIG_CSTCLOUD_PROVIDER: Other
+      RCLONE_CONFIG_CSTCLOUD_ACCESS_KEY_ID: ${{ secrets.CSTCLOUD_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_CSTCLOUD_SECRET_ACCESS_KEY: ${{ secrets.CSTCLOUD_ACCESS_KEY_SECRET }}
+      RCLONE_CONFIG_CSTCLOUD_ENDPOINT: ${{ vars.CSTCLOUD_ENDPOINT }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install rclone
+        run: sudo apt-get update && sudo apt-get install -y rclone
+
+      - name: Sync release to CSTCloud
+        run: bun script/sync-cstcloud-release.ts "$VERSION"
